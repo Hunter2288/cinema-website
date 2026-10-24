@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Оплата — Показ тіней</title>
+  <link rel="stylesheet" href="main.css">
+</head>
+<body>
+<div id="header"></div>
+<main class="wrap" id="content"><p class="msg">Завантаження…</p></main>
+<div id="footer"></div>
+
+<script src="app.js"></script>
+<script>
+header("films"); footer();
+
+const $ = id => document.getElementById(id);
+const box = $("content");
+const num = new URLSearchParams(location.search).get("order");
+let order, method = "card", timer = null;
+
+const shortDate = d => cap(new Date(d).toLocaleDateString("uk-UA", { weekday: "short", day: "numeric", month: "short" }));
+const luhn = s => { let sum = 0, alt = false; for (let i = s.length - 1; i >= 0; i--) { let n = +s[i]; if (alt) { n *= 2; if (n > 9) n -= 9; } sum += n; alt = !alt; } return sum % 10 === 0; };
+
+(async () => {
+  try { order = await api("/orders/" + encodeURIComponent(num || "")); }
+  catch (e) {
+    box.innerHTML = `<p class="msg err">Замовлення не знайдено. <a href="catalog.html" style="text-decoration:underline">До каталогу</a></p>`;
+    return;
+  }
+  if (order.status === "Paid" || order.status === "OnSite") { location.replace("ticket.html?order=" + encodeURIComponent(num)); return; }
+  if (order.status === "Cancelled") {
+    box.innerHTML = `<p class="msg err">Час утримання місць минув. <a href="booking.html?session=${order.session.id}" style="text-decoration:underline">Обрати місця знову</a></p>`;
+    return;
+  }
+  draw();
+  startTimer();
+})();
+
+function draw() {
+  const m = order.movie, s = order.session;
+  box.innerHTML = `
+    ${stepper(3)}
+    <div class="pay">
+      <div>
+        <h1>Оплата замовлення</h1>
+        <div class="card">
+          <h3>Спосіб оплати</h3>
+          <label class="radio"><input type="radio" name="pm" value="card" checked> Банківська картка</label>
+          <div class="paybox" id="cardbox">
+            <label class="f"><span>Номер картки</span><input id="cnum" inputmode="numeric" placeholder="0000 0000 0000 0000" autocomplete="cc-number"></label>
+            <label class="f"><span>Термін дії</span><input id="cexp" inputmode="numeric" placeholder="MM / РР" autocomplete="cc-exp"></label>
+            <label class="f"><span>CVV</span><input id="ccvv" type="password" inputmode="numeric" placeholder="•••" autocomplete="cc-csc"></label>
+            <label class="f wide"><span>Ім'я власника</span><input id="cname" placeholder="IVAN PETRENKO" autocomplete="cc-name"></label>
+          </div>
+          <label class="radio"><input type="radio" name="pm" value="wallet"> Apple Pay / Google Pay</label>
+          <label class="radio"><input type="radio" name="pm" value="onsite"> Оплата на місці (при вході)</label>
+
+          <label class="f" style="margin-top:22px"><span>Електронна пошта для надсилання квитка</span>
+            <input id="pemail" type="email" value="${esc(order.email || "")}" autocomplete="email"></label>
+          <label class="check" style="margin-top:20px"><input type="checkbox" id="agree"> Погоджуюсь з умовами оферти</label>
+          <p class="loc" style="margin-top:14px;font-size:.8rem">Це навчальна версія: оплата імітується, дані картки нікуди не надсилаються й не зберігаються.</p>
+        </div>
+      </div>
+
+      <aside class="card">
+        <h3>Ваше замовлення</h3>
+        <div class="order-mv">
+          <div class="im">${m.posterUrl ? `<img src="${esc(m.posterUrl)}" alt="">` : ""}</div>
+          <div>
+            <h3>${esc(m.title)}</h3>
+            <div class="loc">${shortDate(s.startTime)} · ${fmtTime(s.startTime)}</div>
+            <div class="loc">${esc([s.hall, s.location].filter(Boolean).join(" · "))}</div>
+          </div>
+        </div>
+        <div class="rows" id="rows"></div>
+        <div class="promo-row">
+          <input id="promo" placeholder="Промокод" aria-label="Промокод">
+          <button class="btn dark" id="apply">Застосувати</button>
+        </div>
+        <div class="due"><span>До сплати</span><b id="due"></b></div>
+        <div class="hold" id="hold"></div>
+        <button class="btn block-btn" id="pay"></button>
+      </aside>
+    </div>`;
+
+  const cnum = $("cnum"), cexp = $("cexp"), ccvv = $("ccvv");
+  cnum.oninput = () => { cnum.value = cnum.value.replace(/\D/g, "").slice(0, 16).replace(/(\d{4})(?=\d)/g, "$1 "); };
+  cexp.oninput = () => { const d = cexp.value.replace(/\D/g, "").slice(0, 4); cexp.value = d.length > 2 ? d.slice(0, 2) + " / " + d.slice(2) : d; };
+  ccvv.oninput = () => { ccvv.value = ccvv.value.replace(/\D/g, "").slice(0, 3); };
+
+  document.querySelectorAll("input[name=pm]").forEach(r => r.onchange = () => {
+    method = r.value;
+    $("cardbox").style.display = method === "card" ? "grid" : "none";
+    sumUp();
+  });
+
+  $("apply").onclick = async () => {
+    try {
+      order = await api(`/orders/${encodeURIComponent(num)}/promo`, { method: "POST", body: JSON.stringify({ code: $("promo").value }) });
+      toast("Промокод застосовано");
+      sumUp();
+    } catch (err) { toast(err.detail || "Не вдалося застосувати промокод"); }
+  };
+
+  $("pay").onclick = pay;
+  sumUp();
+}
+
+function sumUp() {
+  const n = order.seats.length;
+  $("rows").innerHTML = `
+    <div><span>Місця</span><b>${esc(seatsText(order.seats.map(x => x.code)))}</b></div>
+    <div><span>Квиток × ${n}</span><b>${price(order.subtotal)}</b></div>
+    ${order.discount > 0 ? `<div><span>Знижка</span><b>−${price(order.discount)}</b></div>` : ""}
+    <div><span>Сервісний збір</span><b>${price(order.fee)}</b></div>`;
+  $("due").textContent = price(order.total);
+  $("pay").textContent = method === "onsite" ? "Підтвердити бронювання" : `Сплатити ${price(order.total)}`;
+}
+
+function startTimer() {
+  const tick = () => {
+    const left = Math.floor((new Date(order.expiresAt) - Date.now()) / 1000);
+    if (left <= 0) {
+      clearInterval(timer);
+      toast("Час утримання місць минув");
+      setTimeout(() => location.href = "booking.html?session=" + order.session.id, 1500);
+      return;
+    }
+    $("hold").textContent = "Місця утримано " + String(Math.floor(left / 60)).padStart(2, "0") + ":" + String(left % 60).padStart(2, "0");
+  };
+  tick();
+  timer = setInterval(tick, 1000);
+}
+
+function cardOk() {
+  const num16 = $("cnum").value.replace(/\s/g, "");
+  if (num16.length !== 16 || !luhn(num16)) { toast("Перевірте номер картки"); $("cnum").focus(); return false; }
+  const [mm, yy] = $("cexp").value.split("/").map(s => parseInt(s.trim(), 10));
+  const end = new Date(2000 + yy, mm, 0, 23, 59);
+  if (!mm || mm < 1 || mm > 12 || !yy || end < new Date()) { toast("Перевірте термін дії картки"); $("cexp").focus(); return false; }
+  if ($("ccvv").value.length !== 3) { toast("Введіть CVV (3 цифри)"); $("ccvv").focus(); return false; }
+  if ($("cname").value.trim().length < 3) { toast("Введіть ім'я власника картки"); $("cname").focus(); return false; }
+  return true;
+}
+
+async function pay() {
+  const email = $("pemail").value.trim();
+  if (!$("agree").checked) { toast("Підтвердьте згоду з умовами оферти"); return; }
+  if (!emailOk(email)) { toast("Введіть коректний email"); $("pemail").focus(); return; }
+  if (method === "card" && !cardOk()) return;
+
+  $("pay").disabled = true;
+  $("pay").textContent = "Обробка…";
+  try {
+    await new Promise(r => setTimeout(r, method === "card" ? 900 : 300));   // імітація банку
+    await api(`/orders/${encodeURIComponent(num)}/pay`, { method: "POST", body: JSON.stringify({ method, email }) });
+    clearInterval(timer);
+    location.href = "ticket.html?order=" + encodeURIComponent(num);
+  } catch (err) {
+    toast(err.detail || "Оплата не вдалася");
+    $("pay").disabled = false;
+    sumUp();
+  }
+}
+</script>
+</body>
+</html>

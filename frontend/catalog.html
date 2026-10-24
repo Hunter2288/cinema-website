@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Кінотеатр — Показ тіней</title>
+  <link rel="stylesheet" href="main.css">
+</head>
+<body>
+<div id="header"></div>
+<main class="wrap">
+  <div class="page-head"><a class="back" href="index.html" aria-label="На головну">‹</a><h1 id="ttl">Кінотеатр</h1></div>
+  <div class="catalog" id="catalog"><p class="msg">Завантаження…</p></div>
+</main>
+<div id="footer"></div>
+
+<script src="app.js"></script>
+<script>
+header("films"); footer();
+
+const q = (new URLSearchParams(location.search).get("q") || "").trim().toLowerCase();
+const box = document.getElementById("catalog");
+if (q) document.getElementById("ttl").textContent = "Результати пошуку";
+
+api("/movies").then(all => {
+  const now = new Date();
+  const base = q ? all : all.filter(m => !m.releaseDate || new Date(m.releaseDate) <= now);
+  const list = base.filter(m => m.title.toLowerCase().includes(q));
+  box.innerHTML = list.length ? list.map(m => filmCard(m, false)).join("") : `<p class="msg">Нічого не знайдено.</p>`;
+}).catch(e => showError(box, e));
+</script>
+</body>
+</html> 

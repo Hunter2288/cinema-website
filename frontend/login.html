@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Вхід — Показ тіней</title>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:Inter,"Segoe UI",system-ui,sans-serif;color:#eceef8;min-height:100vh;display:flex;flex-direction:column;
+      background:
+        radial-gradient(60% 55% at 10% 72%,#c0303a 0,transparent 70%),
+        radial-gradient(45% 45% at 92% 8%,#2f6fd0 0,transparent 70%),
+        radial-gradient(45% 45% at 82% 92%,#2b8fc9 0,transparent 70%),
+        radial-gradient(50% 40% at 55% 0%,#3b3b3b 0,transparent 70%),#2c2f6b}
+    a{color:inherit;text-decoration:none}
+    .bar{display:flex;justify-content:space-between;align-items:center;padding:12px 28px}
+    .brand{display:flex;align-items:center;gap:10px;font-size:1.4rem;font-weight:500}
+    .brand img{height:52px;width:auto}
+    .back{font-size:.95rem;opacity:.85}
+    main{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:20px;gap:22px}
+    .card{width:100%;max-width:384px;background:rgba(50,52,74,.96);border:1px solid rgba(255,255,255,.18);border-radius:8px;overflow:hidden}
+    .tabs{display:grid;grid-template-columns:1fr 1fr;border-bottom:1px solid rgba(255,255,255,.2)}
+    .tab{background:none;border:0;border-bottom:2px solid transparent;color:#b8bad0;font:inherit;padding:18px 0 14px;cursor:pointer}
+    .tab.on{color:#e44d6a;border-bottom-color:#e44d6a}
+    form{padding:26px 32px 30px;display:none;flex-direction:column;gap:4px}
+    form.on{display:flex}
+    form h2{font-size:1.5rem;font-weight:700}
+    form .lead{color:#b8bad0;font-size:.8rem;margin-bottom:6px}
+    label.l{font-size:.85rem;color:#d6d8ea;margin-top:12px}
+    .field{position:relative;margin-top:6px}
+    input[type=text],input[type=email],input[type=password],input[type=tel]{width:100%;height:48px;border-radius:6px;border:1px solid #4b4f96;background:#50516a;color:#fff;font:inherit;padding:0 44px 0 16px}
+    input::placeholder{color:#b4b6cc}
+    input:focus-visible,button:focus-visible{outline:2px solid #e44d6a;outline-offset:1px}
+    .eye{position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:0;color:#e44d6a;cursor:pointer;padding:6px;display:flex}
+    .row{display:flex;justify-content:space-between;align-items:center;margin-top:14px;font-size:.85rem;color:#c5c7dc}
+    .row label{display:flex;gap:8px;align-items:center;cursor:pointer}
+    .row a,.row button.lnk{color:#e44d6a;background:none;border:0;font:inherit;cursor:pointer}
+    .terms{display:flex;gap:8px;align-items:center;font-size:.78rem;color:#c5c7dc;margin-top:16px;cursor:pointer}
+    .submit{margin-top:18px;height:48px;border:0;border-radius:6px;background:#e44d6a;color:#fff;font:inherit;font-size:1rem;cursor:pointer}
+    .submit:hover{background:#f0607c}
+    .submit:disabled{opacity:.6;cursor:wait}
+    .err{color:#ffb4c0;font-size:.85rem;min-height:1.2em;margin-top:10px}
+    .or{display:flex;align-items:center;gap:14px;color:#aeb0c6;font-size:.8rem;margin:16px 0 14px}
+    .or:before,.or:after{content:"";flex:1;height:1px;background:rgba(255,255,255,.25)}
+    .guest{height:46px;border:1px solid #e44d6a;border-radius:6px;background:transparent;color:#e44d6a;font:inherit;cursor:pointer}
+    .guest:hover{background:rgba(228,77,106,.12)}
+    .hint{text-align:center;color:#aeb0c6;font-size:.72rem;margin-top:12px}
+    .sw{text-align:center;font-size:.85rem;margin-top:12px}
+    .sw button{background:none;border:0;color:#fff;font:inherit;cursor:pointer;text-decoration:underline}
+    .links{display:flex;gap:22px;justify-content:center;color:rgba(255,255,255,.6);font-size:.9rem}
+    .foot{text-align:center;padding:6px 14px 18px;color:rgba(255,255,255,.5);font-size:.8rem}
+  </style>
+</head>
+<body>
+  <div class="bar">
+    <a class="brand" href="index.html"><img src="images/logo.png" alt="" onerror="this.remove()"><span>Показ тіней</span></a>
+    <a class="back" href="index.html">← На головну</a>
+  </div>
+
+  <main>
+    <div class="card">
+      <div class="tabs" role="tablist">
+        <button class="tab on" data-tab="login" role="tab">Вхід</button>
+        <button class="tab" data-tab="register" role="tab">Реєстрація</button>
+      </div>
+
+      <form id="login" class="on" novalidate>
+        <label class="l" for="l-email">Email</label>
+        <div class="field"><input id="l-email" type="email" placeholder="your@email.com" autocomplete="email"></div>
+        <label class="l" for="l-pass">Пароль</label>
+        <div class="field">
+          <input id="l-pass" type="password" placeholder="Введіть пароль" autocomplete="current-password">
+          <button type="button" class="eye" data-eye="l-pass" aria-label="Показати пароль"></button>
+        </div>
+        <div class="row">
+          <label><input type="checkbox" id="remember"> Запам'ятати мене</label>
+          <button type="button" class="lnk" id="forgot">Забули пароль?</button>
+        </div>
+        <div class="err" id="l-err" role="alert"></div>
+        <button class="submit" type="submit">Увійти</button>
+        <div class="or">або</div>
+        <button class="guest" type="button" id="guest">Продовжити як гість →</button>
+        <div class="hint">Реєстрація не потрібна для купівлі квитків</div>
+      </form>
+
+      <form id="register" novalidate>
+        <h2>Створіть акаунт</h2>
+        <div class="lead">Зберігайте квитки й бронювання в одному місці</div>
+        <label class="l" for="r-name">Ім'я та Прізвище</label>
+        <div class="field"><input id="r-name" type="text" placeholder="Введіть ім'я та Прізвище" autocomplete="name"></div>
+        <label class="l" for="r-phone">Телефон</label>
+        <div class="field"><input id="r-phone" type="tel" placeholder="+380 __ ___ __ __" autocomplete="tel"></div>
+        <label class="l" for="r-email">Email</label>
+        <div class="field"><input id="r-email" type="email" placeholder="your@email.com" autocomplete="email"></div>
+        <label class="l" for="r-pass">Пароль</label>
+        <div class="field">
+          <input id="r-pass" type="password" placeholder="Введіть пароль (мінімум 6 символів)" autocomplete="new-password">
+          <button type="button" class="eye" data-eye="r-pass" aria-label="Показати пароль"></button>
+        </div>
+        <label class="l" for="r-pass2">Підтвердіть пароль</label>
+        <div class="field">
+          <input id="r-pass2" type="password" placeholder="Підтвердіть пароль" autocomplete="new-password">
+          <button type="button" class="eye" data-eye="r-pass2" aria-label="Показати пароль"></button>
+        </div>
+        <label class="terms"><input type="checkbox" id="r-terms"> Погоджуюсь з умовами та політикою конфіденційності</label>
+        <div class="err" id="r-err" role="alert"></div>
+        <button class="submit" type="submit" style="margin-top:6px">Зареєструватися</button>
+        <div class="sw">Вже є акаунт? <button type="button" id="to-login">Увійти</button></div>
+      </form>
+    </div>
+    <div class="links"><span>Про нас</span><span>Підтримка</span><span>Конфіденційність</span></div>
+  </main>
+  <div class="foot">© 2025 Показ тіней. Всі права захищені.</div>
+
+<script src="app.js"></script>
+<script>
+const EYE = '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
+document.querySelectorAll(".eye").forEach(b => b.innerHTML = EYE);
+
+const params = new URLSearchParams(location.search);
+const nextRaw = params.get("next") || "";
+const next = /^[\w.-]+\.html(\?[\w=&.%-]*)?$/.test(nextRaw) ? nextRaw : "index.html";
+if (currentUser()) location.replace(next);
+
+function setTab(name) {
+  document.querySelectorAll(".tab").forEach(t => t.classList.toggle("on", t.dataset.tab === name));
+  document.getElementById("login").classList.toggle("on", name === "login");
+  document.getElementById("register").classList.toggle("on", name === "register");
+  document.title = (name === "login" ? "Вхід" : "Реєстрація") + " — Показ тіней";
+}
+document.querySelectorAll(".tab").forEach(t => t.onclick = () => setTab(t.dataset.tab));
+document.getElementById("to-login").onclick = () => setTab("login");
+if (params.get("tab") === "register") setTab("register");
+
+document.querySelectorAll("[data-eye]").forEach(b => b.onclick = () => {
+  const i = document.getElementById(b.dataset.eye);
+  i.type = i.type === "password" ? "text" : "password";
+});
+maskPhone(document.getElementById("r-phone"));
+
+document.getElementById("guest").onclick = () => { location.href = nextRaw && next !== "index.html" ? next : "catalog.html"; };
+document.getElementById("forgot").onclick = () => {
+  document.getElementById("l-err").textContent = "Відновлення пароля поки недоступне. Зверніться до підтримки.";
+};
+
+function saveUser(u, remember) {
+  localStorage.removeItem("user"); sessionStorage.removeItem("user");
+  (remember ? localStorage : sessionStorage).setItem("user", JSON.stringify(u));
+}
+
+async function submit(form, errEl, url, body, remember) {
+  const btn = form.querySelector(".submit");
+  errEl.textContent = "";
+  btn.disabled = true;
+  try {
+    const user = await api(url, { method: "POST", body: JSON.stringify(body) });
+    saveUser(user, remember);
+    location.href = next;
+  } catch (e) {
+    errEl.textContent = e.status
+      ? (e.detail || "Щось пішло не так. Спробуйте ще раз.")
+      : "Немає зв'язку з сервером. Перевірте, що API запущено.";
+    btn.disabled = false;
+  }
+}
+
+document.getElementById("login").onsubmit = e => {
+  e.preventDefault();
+  const email = document.getElementById("l-email").value.trim();
+  const password = document.getElementById("l-pass").value;
+  const err = document.getElementById("l-err");
+  if (!email || !password) { err.textContent = "Введіть email і пароль."; return; }
+  submit(e.target, err, "/auth/login", { email, password }, document.getElementById("remember").checked);
+};
+
+document.getElementById("register").onsubmit = e => {
+  e.preventDefault();
+  const name = document.getElementById("r-name").value.trim();
+  const phoneRaw = document.getElementById("r-phone").value.trim();
+  const phone = phoneRaw === "+380" ? "" : phoneRaw;
+  const email = document.getElementById("r-email").value.trim();
+  const password = document.getElementById("r-pass").value;
+  const err = document.getElementById("r-err");
+  if (name.length < 2) { err.textContent = "Введіть ім'я та прізвище."; return; }
+  if (phone && !phoneOk(phone)) { err.textContent = "Телефон у форматі +380 XX XXX XX XX."; return; }
+  if (!emailOk(email)) { err.textContent = "Введіть коректний email."; return; }
+  if (password.length < 6) { err.textContent = "Пароль має містити щонайменше 6 символів."; return; }
+  if (password !== document.getElementById("r-pass2").value) { err.textContent = "Паролі не збігаються."; return; }
+  if (!document.getElementById("r-terms").checked) { err.textContent = "Підтвердьте згоду з умовами."; return; }
+  submit(e.target, err, "/auth/register", { name, email, password, phone }, true);
+};
+</script>
+</body>
+</html>

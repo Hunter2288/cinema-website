@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Профіль — Показ тіней</title>
+  <link rel="stylesheet" href="main.css">
+</head>
+<body>
+<div id="header"></div>
+<main class="wrap" id="content"><p class="msg">Завантаження…</p></main>
+<div id="footer"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script src="app.js"></script>
+<script>
+header("profile"); footer();
+if (!USER_ID) location.replace("login.html?next=profile.html");
+
+const $ = id => document.getElementById(id);
+const box = $("content");
+let me, orders = [], reqs = [], tab = "future", avatar;   // avatar: undefined = без змін
+
+const ST = { Paid: ["Оплачено", ""], OnSite: ["Оплата при вході", "pending"], Pending: ["Очікує оплати", "pending"], Cancelled: ["Скасовано", "cancelled"] };
+const RST = { New: ["Очікує відповіді", "pending"], UnderReview: ["Розглядається", "pending"], Confirmed: ["Підтверджено", ""], Rejected: ["Відхилено", "cancelled"] };
+const cat = o => o.status === "Cancelled" ? "cancelled" : new Date(o.session.startTime) > new Date() ? "future" : "past";
+
+(async () => {
+  if (!USER_ID) return;
+  try {
+    [me, orders] = await Promise.all([api("/users/" + USER_ID), api("/orders?userId=" + USER_ID)]);
+    try { reqs = await api("/corporaterequests?userId=" + USER_ID); } catch {}
+    draw();
+    if (location.hash === "#reqs") $("reqs").scrollIntoView();
+  } catch (e) {
+    if (e.status === 404) { logout(); return; }
+    showError(box, e);
+  }
+})();
+
+function draw() {
+  box.innerHTML = `
+  <div class="pbox">
+    <div class="phead">
+      <h1>${esc((me.name || "Профіль"))}</h1>
+      <div style="display:flex;gap:12px"><button class="btn line" id="reset">Скасувати</button><button class="btn" id="save">Зберегти</button></div>
+    </div>
+    <div class="pgrid">
+      <div>
+        <div class="pavatar" id="pav"></div>
+        <button class="btn dark block-btn" id="photo">Змінити фото</button>
+        <input type="file" id="file" accept="image/*" hidden>
+      </div>
+      <div class="pfields">
+        <label class="f"><span>Ім'я</span><input id="pf-first" autocomplete="given-name"></label>
+        <label class="f"><span>Прізвище</span><input id="pf-last" autocomplete="family-name"></label>
+        <label class="f"><span>Email</span><input id="pf-email" type="email" autocomplete="email"></label>
+        <label class="f"><span>Дата народження</span><input id="pf-bd" type="date"></label>
+        <label class="f full"><span>Телефон</span><input id="pf-phone" type="tel" placeholder="+380 __ ___ __ __"></label>
+        <h3>Безпека</h3>
+        <div><button class="btn dark" id="pwtoggle">Змінити пароль</button></div>
+        <div class="pwbox" id="pwbox">
+          <label class="f"><span>Поточний пароль</span><input id="pw0" type="password" autocomplete="current-password"></label>
+          <label class="f"><span>Новий пароль</span><input id="pw1" type="password" autocomplete="new-password"></label>
+          <button class="btn" id="pwsave">Оновити пароль</button>
+        </div>
+      </div>
+    </div>
+
+    <h2 class="ptitle" id="tickets">Мої квитки</h2>
+    <div class="dtabs" id="tabs"></div>
+    <div id="tlist" style="margin-top:22px"></div>
+
+    <h2 class="ptitle" id="reqs">Мої заявки на приватні покази</h2>
+    <div id="rlist"></div>
+
+    <div class="pfoot">
+      <button class="btn line" id="out">Вийти з акаунта</button>
+      <button class="linkbtn" id="del">Видалити акаунт</button>
+    </div>
+  </div>`;
+
+  fillForm();
+  maskPhone($("pf-phone"));
+  renderTabs();
+  renderTickets();
+  renderReqs();
+
+  $("reset").onclick = () => { avatar = undefined; fillForm(); toast("Зміни скасовано"); };
+  $("save").onclick = save;
+  $("photo").onclick = () => $("file").click();
+  $("file").onchange = async e => {
+    const f = e.target.files[0];
+    if (!f) return;
+    try { avatar = await resizeImage(f); paintAvatar(); }
+    catch (err) { toast(err.message); }
+  };
+  $("pwtoggle").onclick = () => $("pwbox").classList.toggle("open");
+  $("pwsave").onclick = changePassword;
+  $("out").onclick = logout;
+  $("del").onclick = deleteAccount;
+
+  $("tabs").onclick = e => {
+    const b = e.target.closest(".dtab");
+    if (!b) return;
+    if (b.dataset.t === "reqs") { $("reqs").scrollIntoView({ behavior: "smooth" }); return; }
+    tab = b.dataset.t;
+    renderTabs();
+    renderTickets();
+  };
+  $("tlist").onclick = async e => {
+    const b = e.target.closest("[data-cancel]");
+    if (!b || !confirm("Скасувати це бронювання?")) return;
+    try {
+      await api(`/orders/${encodeURIComponent(b.dataset.cancel)}/cancel`, { method: "POST" });
+      orders = await api("/orders?userId=" + USER_ID);
+      renderTabs(); renderTickets();
+      toast("Бронювання скасовано");
+    } catch (err) { toast("Не вдалося скасувати: " + err.message); }
+  };
+}
+
+function paintAvatar() {
+  const src = avatar !== undefined ? avatar : me.avatarUrl;
+  $("pav").innerHTML = src ? `<img src="${esc(src)}" alt="Фото профілю">` : esc((me.name || "?").charAt(0).toUpperCase());
+}
+
+function fillForm() {
+  $("pf-first").value = me.firstName || "";
+  $("pf-last").value = me.lastName || "";
+  $("pf-email").value = me.email || "";
+  $("pf-bd").value = me.birthDate ? String(me.birthDate).slice(0, 10) : "";
+  $("pf-phone").value = me.phone || "";
+  paintAvatar();
+}
+
+async function save() {
+  const body = {
+    firstName: $("pf-first").value.trim(), lastName: $("pf-last").value.trim(),
+    email: $("pf-email").value.trim(), phone: $("pf-phone").value.trim(),
+    birthDate: $("pf-bd").value || null,
+  };
+  if (avatar !== undefined) body.avatarUrl = avatar;
+  if (body.phone && body.phone.replace(/\D/g, "").length < 12 && body.phone !== "+380") { toast("Перевірте номер телефону"); return; }
+  if (body.phone === "+380") body.phone = "";
+  $("save").disabled = true;
+  try {
+    me = await api("/users/" + USER_ID, { method: "PUT", body: JSON.stringify(body) });
+    avatar = undefined;
+    (localStorage.getItem("user") ? localStorage : sessionStorage).setItem("user", JSON.stringify(me));
+    document.querySelector(".phead h1").textContent = me.name;
+    fillForm();
+    toast("Профіль збережено");
+  } catch (err) { toast(err.detail || "Не вдалося зберегти"); }
+  $("save").disabled = false;
+}
+
+async function changePassword() {
+  try {
+    await api(`/users/${USER_ID}/password`, { method: "POST", body: JSON.stringify({ oldPassword: $("pw0").value, newPassword: $("pw1").value }) });
+    $("pw0").value = ""; $("pw1").value = "";
+    $("pwbox").classList.remove("open");
+    toast("Пароль змінено");
+  } catch (err) { toast(err.detail || "Не вдалося змінити пароль"); }
+}
+
+async function deleteAccount() {
+  if (!confirm("Видалити акаунт разом з усіма квитками й відгуками? Дію не можна скасувати.")) return;
+  const password = prompt("Введіть пароль для підтвердження:");
+  if (!password) return;
+  try {
+    await api(`/users/${USER_ID}/delete`, { method: "POST", body: JSON.stringify({ password }) });
+    logout();
+  } catch (err) { toast(err.detail || "Не вдалося видалити акаунт"); }
+}
+
+function resizeImage(file, size = 256) {
+  return new Promise((ok, fail) => {
+    const img = new Image(), url = URL.createObjectURL(file);
+    img.onload = () => {
+      const s = Math.min(img.width, img.height), c = document.createElement("canvas");
+      c.width = c.height = size;
+      c.getContext("2d").drawImage(img, (img.width - s) / 2, (img.height - s) / 2, s, s, 0, 0, size, size);
+      URL.revokeObjectURL(url);
+      ok(c.toDataURL("image/jpeg", 0.85));
+    };
+    img.onerror = () => fail(new Error("Не вдалося прочитати зображення"));
+    img.src = url;
+  });
+}
+
+function renderTabs() {
+  const n = c => orders.filter(o => cat(o) === c).length;
+  const T = [["future", "Майбутні", n("future")], ["past", "Минулі", n("past")], ["cancelled", "Скасовані", n("cancelled")], ["reqs", "Мої заявки", reqs.length]];
+  $("tabs").innerHTML = T.map(([k, t, c]) => `<button class="dtab ${tab === k ? "on" : ""}" data-t="${k}">${t} (${c})</button>`).join("");
+}
+
+function renderTickets() {
+  const list = orders.filter(o => cat(o) === tab);
+  $("tlist").innerHTML = list.length ? list.map(o => {
+    const m = o.movie, s = o.session, [stText, stCls] = ST[o.status] || [o.status, ""];
+    const sub = [(m.genre || "").split(",")[0].trim(), durText(m.durationMinutes)].filter(Boolean).join(" ");
+    return `<div class="tk">
+      <div class="poster">${m.posterUrl ? `<img src="${esc(m.posterUrl)}" alt="">` : ""}</div>
+      <div>
+        <h3>${esc(m.title)}</h3>
+        <div class="loc">${esc(sub)}${m.rating != null ? ` · <span class="ystar">★</span> ${esc(m.rating)}` : ""}</div>
+        <div class="acts">
+          ${m.trailerUrl ? `<a class="btn dark small" href="${esc(m.trailerUrl)}" target="_blank" rel="noopener">▶ Трейлер</a>` : ""}
+          <a class="btn dark small" href="film.html?id=${m.id}">Про фільм</a>
+        </div>
+      </div>
+      <div class="info">
+        <div>${esc(seatsText(o.seats.map(x => x.code)))}</div>
+        <div>Дата: ${fmtDate(s.startTime)}</div>
+        <div>Час: ${fmtTime(s.startTime)} · ${esc(s.hall || s.location || "")}</div>
+        <span class="stbadge ${stCls}">${stText}</span>
+        <div class="acts">
+          <a class="btn white small" href="ticket.html?order=${encodeURIComponent(o.number)}">Показати QR</a>
+          ${cat(o) === "future" ? `<button class="btn line small" data-cancel="${esc(o.number)}">Скасувати</button>` : ""}
+        </div>
+      </div>
+      ${o.status === "Cancelled" ? "<div></div>" : `<div class="qr" data-qr="${esc(o.number)}"></div>`}
+    </div>`;
+  }).join("") : `<p class="msg">Тут поки порожньо. <a href="catalog.html" style="text-decoration:underline">Обрати фільм</a></p>`;
+  document.querySelectorAll("[data-qr]").forEach(el => drawQR(el, el.dataset.qr, 130));
+}
+
+function renderReqs() {
+  $("rlist").innerHTML = reqs.length ? reqs.map(r => {
+    const [t, c] = RST[r.status] || [r.status, ""];
+    const d = new Date(r.desiredDate);
+    return `<div class="req">
+      <div>
+        <h3>Заявка №${esc(r.number)}</h3>
+        <div class="loc">${d.toLocaleDateString("uk-UA")}, ${fmtTime(d)} · ${esc(r.location)} · ~${r.guestsCount} осіб</div>
+      </div>
+      <div style="display:flex;gap:16px;align-items:center">
+        <span class="stbadge ${c}">${t}</span>
+        <a class="btn dark small" href="private.html?done=${r.id}">Деталі заявки</a>
+      </div>
+    </div>`;
+  }).join("") : `<p class="msg">Заявок поки немає. <a href="private.html" style="text-decoration:underline">Замовити приватний показ</a></p>`;
+}
+</script>
+</body>
+</html>

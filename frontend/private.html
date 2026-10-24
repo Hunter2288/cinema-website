@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Приватний показ — Показ тіней</title>
+  <link rel="stylesheet" href="main.css">
+</head>
+<body>
+<div id="header"></div>
+<main class="wrap" id="content"><p class="msg">Завантаження…</p></main>
+<div id="footer"></div>
+
+<script src="app.js"></script>
+<script>
+header("private"); footer();
+
+const $ = id => document.getElementById(id);
+const box = $("content");
+const doneId = Number(new URLSearchParams(location.search).get("done"));
+const LOCS = {
+  cinema: ["Кінозал", "Класичний комфорт з професійним обладнанням"],
+  restaurant: ["Ресторан", "Романтична вечеря під великим екраном"],
+  custom: ["Ваша локація", "Ми привеземо усе потрібне до вашої локації"],
+};
+const EVENTS = ["День народження", "Корпоратив", "Романтичний вечір", "Вечірка з друзями", "Інше"];
+const TIMES = Array.from({ length: 14 }, (_, i) => String(i + 10).padStart(2, "0") + ":00");
+const RST = { New: ["Очікує відповіді", "pending"], UnderReview: ["Розглядається", "pending"], Confirmed: ["Підтверджено", ""], Rejected: ["Відхилено", "cancelled"] };
+
+const st = { movieId: null, movieTitle: "", loc: "", guests: "", event: EVENTS[0], time: "18:00" };
+let movies = [];
+const estimate = (loc, g) => (loc === "cinema" ? 4500 : loc === "restaurant" ? 6000 : 7500) + Math.max(0, (Number(g) || 0) - 20) * 50;
+const fmtD = v => v ? v.split("-").reverse().join(".") : "—";
+
+(async () => {
+  try {
+    if (doneId) { await showDone(); return; }
+    movies = (await api("/movies")).filter(m => !m.releaseDate || new Date(m.releaseDate) <= new Date()).slice(0, 8);
+    draw();
+  } catch (e) { showError(box, e); }
+})();
+
+function draw() {
+  const tomorrow = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+  box.innerHTML = `
+  <div class="pvhead" style="padding-top:34px"><h1>Бронювання приватної сесії</h1>
+    <p>Створіть незабутній кінематографічний досвід для вас та ваших близьких</p></div>
+  <div class="steps" id="steps"></div>
+
+  <div class="pv">
+    <div>
+      <div class="card" id="c1"><h3>Крок 1: Виберіть фільм</h3>
+        <div class="pfilms" id="pfilms">${movies.map(m => `
+          <button class="pf" data-id="${m.id}"><div class="im">${m.posterUrl ? `<img src="${esc(m.posterUrl)}" alt="">` : ""}</div><span>${esc(m.title)}</span></button>`).join("")}</div>
+      </div>
+
+      <div class="card" id="c2"><h3>Крок 2: Виберіть локацію</h3>
+        <div class="locs" id="locs">${Object.entries(LOCS).map(([k, [t, d]]) => `<button class="lc" data-l="${k}"><b>${t}</b><small>${d}</small></button>`).join("")}</div>
+        <label class="f" id="addrwrap" hidden><span>Адреса проведення *</span><input id="addr" placeholder="м. Чернівці, вул. Прикладна, 1"></label>
+      </div>
+
+      <div class="card" id="c3"><h3>Крок 3: Деталі бронювання</h3>
+        <div class="params2">
+          <label class="f"><span>Кількість гостей*</span><input id="guests" type="number" min="1" max="500"></label>
+          <label class="f"><span>Тип заходу</span><select id="event">${EVENTS.map(e => `<option>${e}</option>`).join("")}</select></label>
+          <label class="f"><span>Ваше ім'я*</span><input id="name" autocomplete="name" value="${esc((USER && USER.name) || "")}"></label>
+          <label class="f"><span>Номер телефону*</span><input id="phone" type="tel" placeholder="+380 __ ___ __ __" value="${esc((USER && USER.phone) || "")}"></label>
+          <label class="f" style="grid-column:1/-1"><span>Email*</span><input id="email" type="email" autocomplete="email" value="${esc((USER && USER.email) || "")}"></label>
+        </div>
+      </div>
+
+      <div class="card" id="c4"><h3>Крок 4: Дата та час</h3>
+        <div class="params2">
+          <label class="f"><span>Бажана дата*</span><input id="date" type="date" min="${tomorrow}"></label>
+          <label class="f"><span>Виберіть час*</span><select id="time">${TIMES.map(t => `<option ${t === st.time ? "selected" : ""}>${t}</option>`).join("")}</select></label>
+        </div>
+      </div>
+
+      <div class="card"><h3>Коментар до замовлення</h3>
+        <label class="f"><textarea id="comment" maxlength="500" aria-label="Коментар"></textarea></label></div>
+
+      <label class="check" style="margin-bottom:26px"><input type="checkbox" id="agree"> Погоджуюсь з умовами та обробкою персональних даних</label>
+    </div>
+
+    <aside class="card sum">
+      <h3>Деталі бронювання</h3>
+      <dl>
+        <dt>Фільм</dt><dd id="s-film">—</dd>
+        <dt>Локація</dt><dd id="s-loc">—</dd>
+        <dt>Кількість гостей</dt><dd id="s-guests">—</dd>
+        <dt>Тип заходу</dt><dd id="s-event"></dd>
+        <dt>Дата</dt><dd id="s-date">—</dd>
+        <dt>Час</dt><dd id="s-time"></dd>
+      </dl>
+      <div class="total"><span>Орієнтовна ціна</span><b id="s-price">—</b></div>
+      <button class="btn" id="send">Надіслати заявку</button>
+      <small>Менеджер зв'яжеться з вами протягом 1 робочого дня</small>
+    </aside>
+  </div>`;
+
+  maskPhone($("phone"));
+  $("pfilms").onclick = e => {
+    const b = e.target.closest(".pf");
+    if (!b) return;
+    st.movieId = Number(b.dataset.id);
+    st.movieTitle = movies.find(m => m.id === st.movieId).title;
+    document.querySelectorAll(".pf").forEach(x => x.classList.toggle("on", x === b));
+    sync();
+  };
+  $("locs").onclick = e => {
+    const b = e.target.closest(".lc");
+    if (!b) return;
+    st.loc = b.dataset.l;
+    document.querySelectorAll(".lc").forEach(x => x.classList.toggle("on", x === b));
+    $("addrwrap").hidden = st.loc !== "custom";
+    sync();
+  };
+  ["guests", "event", "name", "phone", "email", "date", "time", "addr"].forEach(i => $(i).addEventListener("input", sync));
+  $("send").onclick = send;
+  sync();
+}
+
+function sync() {
+  st.guests = $("guests").value; st.event = $("event").value; st.time = $("time").value;
+  $("s-film").textContent = st.movieTitle || "—";
+  $("s-loc").textContent = st.loc === "custom" ? ($("addr").value.trim() || LOCS.custom[0]) : st.loc ? LOCS[st.loc][0] : "—";
+  $("s-guests").textContent = st.guests || "—";
+  $("s-event").textContent = st.event;
+  $("s-date").textContent = fmtD($("date").value);
+  $("s-time").textContent = st.time;
+  $("s-price").textContent = st.loc ? "від " + price(estimate(st.loc, st.guests)) : "—";
+
+  const done = [!!st.movieId,
+    !!st.loc && (st.loc !== "custom" || $("addr").value.trim().length > 2),
+    Number(st.guests) > 0 && $("name").value.trim().length > 1 && phoneOk($("phone").value) && emailOk($("email").value.trim()),
+    !!$("date").value];
+  const next = done.indexOf(false);
+  const L = ["Фільм", "Локація", "Деталі", "Дата та час"];
+  $("steps").innerHTML = L.map((t, i) => `${i ? '<span class="step-line"></span>' : ""}<span class="step ${done[i] || i === next ? "on" : ""}"><i>${i + 1}</i>${t}</span>`).join("");
+}
+
+async function send() {
+  const name = $("name").value.trim(), phone = $("phone").value.trim(), email = $("email").value.trim(), date = $("date").value;
+  if (!st.movieId) { toast("Оберіть фільм"); $("c1").scrollIntoView({ behavior: "smooth" }); return; }
+  if (!st.loc) { toast("Оберіть локацію"); $("c2").scrollIntoView({ behavior: "smooth" }); return; }
+  if (st.loc === "custom" && $("addr").value.trim().length < 3) { toast("Вкажіть адресу проведення"); $("addr").focus(); return; }
+  if (!(Number(st.guests) >= 1)) { toast("Вкажіть кількість гостей"); $("guests").focus(); return; }
+  if (name.length < 2) { toast("Вкажіть ім'я"); $("name").focus(); return; }
+  if (!phoneOk(phone)) { toast("Введіть телефон у форматі +380 XX XXX XX XX"); $("phone").focus(); return; }
+  if (!emailOk(email)) { toast("Введіть коректний email"); $("email").focus(); return; }
+  if (!date) { toast("Оберіть дату"); $("date").focus(); return; }
+  if (!$("agree").checked) { toast("Підтвердьте згоду з умовами"); return; }
+
+  $("send").disabled = true;
+  try {
+    const r = await api("/corporaterequests", { method: "POST", body: JSON.stringify({
+      movieId: st.movieId, userId: USER_ID, locationType: st.loc, address: $("addr").value.trim(),
+      guests: Number(st.guests), eventType: st.event, name, phone, email,
+      desiredDate: `${date}T${st.time}:00`, comment: $("comment").value.trim() }) });
+    location.href = "private.html?done=" + r.id;
+  } catch (err) { toast(err.detail || "Не вдалося надіслати заявку"); $("send").disabled = false; }
+}
+
+async function showDone() {
+  const r = await api("/corporaterequests/" + doneId);
+  const [t, c] = RST[r.status] || [r.status, ""];
+  const d = new Date(r.desiredDate);
+  const when = `${d.toLocaleDateString("uk-UA")}, ${fmtTime(d)}`;
+  box.innerHTML = `
+  <div class="done">
+    <div class="okring">✓</div>
+    <h1>Заявку надіслано</h1>
+    <p class="sub">Менеджер зв'яжеться з вами протягом 1 робочого дня</p>
+    <div class="card reqcard">
+      <h3 class="t">Деталі заявки №${esc(r.number)}</h3>
+      <dl class="reqgrid">
+        <div><dt>Організатор</dt><dd>${esc(r.contactName)}</dd></div>
+        <div><dt>Телефон</dt><dd>${esc(r.contactPhone)}</dd></div>
+        <div><dt>Бажана дата</dt><dd>${when}</dd></div>
+        <div><dt>Гостей</dt><dd>~${r.guestsCount}</dd></div>
+        <div><dt>Фільм / формат</dt><dd>${esc(r.movieTitle || "Фільм за вашим вибором")} · ${esc(r.location)}</dd></div>
+        <div><dt>Статус</dt><dd><span class="stbadge ${c}">${t}</span></dd></div>
+      </dl>
+    </div>
+    <div class="nbtns" style="justify-content:center">
+      <a class="btn white" href="index.html">На головну</a>
+      <a class="btn dark" href="profile.html#reqs">Подивитись статус</a>
+    </div>
+  </div>`;
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Бронювання — Показ тіней</title>
+  <link rel="stylesheet" href="main.css">
+</head>
+<body>
+<div id="header"></div>
+<main class="wrap" id="content"><p class="msg">Завантаження…</p></main>
+<div id="footer"></div>
+
+<script src="app.js"></script>
+<script>
+header("films"); footer();
+
+const $ = id => document.getElementById(id);
+const qs = new URLSearchParams(location.search);
+const box = $("content");
+const HOLD_SEC = 600;
+const selected = new Set();
+let movie, sessions = [], session, taken = new Set(), type = "std", holdLeft = 0, holdTimer = null;
+
+const stdPrice = () => Number(session.price);
+const vipPrice = () => stdPrice() + VIP_EXTRA;
+const seatPrice = c => isVipSeat(c) ? vipPrice() : stdPrice();
+const byTime = (a, b) => new Date(a.startTime) - new Date(b.startTime);
+
+(async () => {
+  try {
+    const sid = Number(qs.get("session")), mid = Number(qs.get("movie"));
+    const all = await api("/sessions");
+    const picked = sid ? all.find(s => s.id === sid) : null;
+    const movieId = picked ? picked.movieId : mid;
+    if (!movieId) { location.replace("catalog.html"); return; }
+
+    movie = await api("/movies/" + movieId);
+    sessions = all.filter(s => s.movieId === movieId && new Date(s.startTime) > new Date()).sort(byTime);
+    if (!sessions.length) {
+      box.innerHTML = `<p class="msg">Для цього фільму поки немає сеансів. <a href="catalog.html" style="text-decoration:underline">До каталогу</a></p>`;
+      return;
+    }
+    session = sessions.find(s => s.id === sid) || sessions[0];
+    draw();
+    fillDates();
+    await loadSession(session);
+  } catch (e) { showError(box, e); }
+})();
+
+function draw() {
+  const saved = JSON.parse(localStorage.getItem("contact") || "null") || {};
+  const email = saved.email || (USER && USER.email) || "";
+  const phone = saved.phone || (USER && USER.phone) || "";
+  const sub = [durText(movie.durationMinutes), movie.ageRating].filter(Boolean).join(" · ");
+
+  box.innerHTML = `
+  <div class="bk">
+    <div>
+      <div class="card"><div class="mv-head">
+        <div>
+          <h1>${esc(movie.title)}</h1>
+          <div class="loc">${esc(sub)}${movie.rating != null ? ` · <span class="ystar">★</span> ${esc(movie.rating)}` : ""}</div>
+        </div>
+        <div class="loc" id="where"></div>
+      </div></div>
+
+      <div class="card"><h3>Оберіть параметри</h3>
+        <div class="params3">
+          <label class="f"><span>Дата</span><select id="dsel"></select></label>
+          <label class="f"><span>Час</span><select id="tsel"></select></label>
+          <label class="f"><span>Тип квитка</span><select id="ysel"></select></label>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="screen"></div><div class="scr-l">ЕКРАН</div>
+        <div id="seats"></div>
+        <div class="legend">
+          <span><i class="sw" style="background:#2a2b34"></i>Вільне</span>
+          <span><i class="sw" style="background:#15161d;border:1px solid #444"></i>Зайнято</span>
+          <span><i class="sw" style="background:var(--red)"></i><span id="vipLeg">VIP</span></span>
+          <span><i class="sw" style="background:#fff"></i>Ваш вибір</span>
+        </div>
+      </div>
+
+      <div class="card"><h3>Контакти для квитка</h3>
+        <div class="params2">
+          <label class="f"><span>Email*</span><input id="email" type="email" placeholder="your@email.com" autocomplete="email" value="${esc(email)}"></label>
+          <label class="f"><span>Телефон*</span><input id="phone" type="tel" placeholder="+380 __ ___ __ __" autocomplete="tel" value="${esc(phone)}"></label>
+        </div>
+        <label class="check" style="margin-top:22px"><input type="checkbox" id="save"> Зберегти дані для наступних замовлень</label>
+      </div>
+    </div>
+
+    <aside class="card sum">
+      <h3>Підсумок бронювання</h3>
+      <dl>
+        <dt>Фільм</dt><dd id="s-film"></dd>
+        <dt>Дата</dt><dd id="s-date"></dd>
+        <dt>Час</dt><dd id="s-time"></dd>
+        <dt>Локація</dt><dd id="s-loc"></dd>
+        <dt>Місця</dt><dd id="s-seats"></dd>
+        <dt>Сервісний збір</dt><dd id="s-fee"></dd>
+      </dl>
+      <div class="total"><span>Всього:</span><b id="s-total"></b></div>
+      <div class="hold" id="hold" hidden></div>
+      <button class="btn" id="buy" disabled>Перейти до оплати</button>
+      <small>Місця утримуються 10 хвилин після переходу до оплати</small>
+    </aside>
+  </div>`;
+
+  maskPhone($("phone"));
+
+  $("dsel").onchange = () => {
+    session = sessions.find(s => dayKey(s.startTime) === $("dsel").value);
+    fillTimes();
+    loadSession(session);
+  };
+  $("tsel").onchange = () => loadSession(sessions.find(s => s.id === Number($("tsel").value)));
+  $("ysel").onchange = () => { type = $("ysel").value; selected.clear(); stopHold(); renderSeats(); updateSummary(); };
+
+  $("seats").onclick = e => {
+    const b = e.target.closest(".seat");
+    if (!b || b.disabled) return;
+    const code = b.dataset.s;
+    selected.has(code) ? selected.delete(code) : selected.add(code);
+    if (selected.size === 1 && !holdTimer) startHold();
+    if (selected.size === 0) stopHold();
+    renderSeats();
+    updateSummary();
+  };
+
+  $("buy").onclick = async () => {
+    const email = $("email").value.trim(), phone = $("phone").value.trim();
+    if (!emailOk(email)) { toast("Введіть коректний email"); $("email").focus(); return; }
+    if (!phoneOk(phone)) { toast("Введіть телефон у форматі +380 XX XXX XX XX"); $("phone").focus(); return; }
+    if ($("save").checked) localStorage.setItem("contact", JSON.stringify({ email, phone }));
+    $("buy").disabled = true;
+    try {
+      const order = await api("/orders", { method: "POST",
+        body: JSON.stringify({ sessionId: session.id, seats: [...selected], userId: USER_ID, email, phone }) });
+      location.href = "payment.html?order=" + encodeURIComponent(order.number);
+    } catch (err) {
+      toast(err.detail || "Не вдалося забронювати");
+      await loadSession(session);
+    }
+  };
+}
+
+function fillDates() {
+  const today = dayKey(new Date());
+  const days = [...new Set(sessions.map(s => dayKey(s.startTime)))];
+  $("dsel").innerHTML = days.map(d => {
+    const s = sessions.find(x => dayKey(x.startTime) === d);
+    return `<option value="${d}" ${d === dayKey(session.startTime) ? "selected" : ""}>${d === today ? "Сьогодні, " : ""}${fmtDate(s.startTime)}</option>`;
+  }).join("");
+  fillTimes();
+}
+
+function fillTimes() {
+  const list = sessions.filter(s => dayKey(s.startTime) === $("dsel").value);
+  $("tsel").innerHTML = list.map(s =>
+    `<option value="${s.id}" ${s.id === session.id ? "selected" : ""}>${fmtTime(s.startTime)}</option>`).join("");
+}
+
+function fillTypes() {
+  $("ysel").innerHTML =
+    `<option value="std" ${type === "std" ? "selected" : ""}>Стандарт · ${price(stdPrice())}</option>` +
+    `<option value="vip" ${type === "vip" ? "selected" : ""}>VIP · ${price(vipPrice())}</option>`;
+  $("vipLeg").textContent = "VIP · " + price(vipPrice());
+}
+
+async function loadSession(s) {
+  session = s;
+  selected.clear();
+  stopHold();
+  taken = new Set();
+  try {
+    const tickets = await api("/tickets?sessionId=" + s.id);
+    tickets.filter(t => !isCancelled(t.status)).forEach(t => taken.add(t.seatNumber));
+  } catch {}
+  $("where").textContent = [s.location, s.hall].filter(Boolean).join(" · ");
+  fillTypes();
+  renderSeats();
+  updateSummary();
+}
+
+function renderSeats() {
+  const vipOnly = type === "vip";
+  const seat = r => i => {
+    const code = seatCode(r, i), vip = r === VIP_ROW, t = taken.has(code), off = vip !== vipOnly;
+    const cls = ["seat", vip ? "vip" : "", t ? "taken" : "", off && !t ? "dis" : "", selected.has(code) ? "sel" : ""].join(" ");
+    return `<button class="${cls}" data-s="${code}" ${t || off ? "disabled" : ""} aria-pressed="${selected.has(code)}"
+      aria-label="Ряд ${r}, місце ${i}${vip ? ", VIP" : ""}${t ? ", зайнято" : ""}">${t ? "×" : i}</button>`;
+  };
+  $("seats").innerHTML = Array.from({ length: ROWS_N }, (_, k) => k + 1).map(r => `
+    <div class="srow"><b>${r}</b>
+      <div class="half">${[1, 2, 3, 4].map(seat(r)).join("")}</div>
+      <div class="half">${[5, 6, 7, 8].map(seat(r)).join("")}</div>
+    </div>`).join("");
+}
+
+function updateSummary() {
+  const seats = [...selected];
+  const sub = seats.reduce((sum, c) => sum + seatPrice(c), 0);
+  const fee = Math.round(sub * FEE_RATE);
+  $("s-film").textContent = movie.title;
+  $("s-date").textContent = fmtDate(session.startTime);
+  $("s-time").textContent = fmtTime(session.startTime);
+  $("s-loc").textContent = [session.location, session.hall].filter(Boolean).join(" · ") || "—";
+  $("s-seats").textContent = seats.length ? seatsText(seats) : "—";
+  $("s-fee").textContent = seats.length ? price(fee) : "—";
+  $("s-total").textContent = price(sub + fee);
+  $("buy").disabled = !seats.length;
+}
+
+const tickHold = () => {
+  $("hold").textContent = "Місце утримано " + String(Math.floor(holdLeft / 60)).padStart(2, "0") + ":" + String(holdLeft % 60).padStart(2, "0");
+};
+function stopHold() { clearInterval(holdTimer); holdTimer = null; if ($("hold")) $("hold").hidden = true; }
+function startHold() {
+  holdLeft = HOLD_SEC;
+  $("hold").hidden = false;
+  tickHold();
+  holdTimer = setInterval(() => {
+    holdLeft--;
+    if (holdLeft <= 0) {
+      stopHold(); selected.clear(); renderSeats(); updateSummary();
+      toast("Час вибору минув. Оберіть місця знову.");
+    } else tickHold();
+  }, 1000);
+}
+</script>
+</body>
+</html>

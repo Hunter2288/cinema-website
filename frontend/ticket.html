@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Квиток — Показ тіней</title>
+  <link rel="stylesheet" href="main.css">
+</head>
+<body>
+<div id="header"></div>
+<main class="wrap" id="content"><p class="msg">Завантаження…</p></main>
+<div id="footer"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script src="app.js"></script>
+<script>
+header("tickets"); footer();
+
+const $ = id => document.getElementById(id);
+const box = $("content");
+const num = new URLSearchParams(location.search).get("order");
+let order;
+
+(async () => {
+  try { order = await api("/orders/" + encodeURIComponent(num || "")); }
+  catch (e) {
+    box.innerHTML = `<p class="msg err">Замовлення не знайдено. <a href="catalog.html" style="text-decoration:underline">До каталогу</a></p>`;
+    return;
+  }
+  if (order.status === "Pending") { location.replace("payment.html?order=" + encodeURIComponent(num)); return; }
+  draw();
+})();
+
+function draw() {
+  const m = order.movie, s = order.session;
+  const cancelled = order.status === "Cancelled";
+  const onsite = order.status === "OnSite";
+  const when = new Date(order.paidAt || order.createdAt).toLocaleString("uk-UA",
+    { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
+  const past = new Date(s.startTime) <= new Date();
+  const dt = `${cap(new Date(s.startTime).toLocaleDateString("uk-UA", { weekday: "short" }))}, ${fmtDate(s.startTime)} · ${fmtTime(s.startTime)}`;
+  const head = [(m.genre || "").split(",")[0].trim(), m.ageRating, m.durationMinutes ? m.durationMinutes + " хв" : ""].filter(Boolean).join(" · ");
+
+  box.innerHTML = `
+    ${stepper(4)}
+    <div class="okbar ${onsite || cancelled ? "warn" : ""}">
+      <b>${cancelled ? "Замовлення скасовано" : onsite ? "Бронювання підтверджено. Оплата при вході" : "Оплата пройшла успішно. Квиток збережено"}</b>
+      <small>Замовлення №${esc(orderLabel(order.number))} · ${when}</small>
+    </div>
+
+    <div class="tgrid">
+      <div class="card">
+        <div class="tbig">
+          <div class="im">${m.posterUrl ? `<img src="${esc(m.posterUrl)}" alt="">` : ""}</div>
+          <div style="flex:1">
+            <h2>${esc(m.title)}</h2>
+            <div class="loc">${esc(head)}</div>
+            <dl class="tfacts">
+              <div><dt>Дата й час</dt><dd>${esc(dt)}</dd></div>
+              <div><dt>Локація</dt><dd>${esc([s.hall, s.location].filter(Boolean).join(" · "))}</dd></div>
+              <div><dt>Місця</dt><dd>${esc(seatsText(order.seats.map(x => x.code)))}</dd></div>
+              <div><dt>Сума</dt><dd>${price(order.total)} · ${onsite ? "оплата при вході" : cancelled ? "скасовано" : "сплачено"}</dd></div>
+            </dl>
+          </div>
+        </div>
+        ${cancelled ? "" : `<div class="tbtns">
+          <button class="btn" id="pdf">Завантажити PDF</button>
+          <button class="btn dark" id="ics">Додати в календар</button>
+          <a class="btn dark" id="mail" href="#">Надіслати на email</a>
+        </div>`}
+      </div>
+
+      <div class="card">
+        <h3 class="t">QR-код квитка</h3>
+        <div class="qrbox"><div id="qr"></div></div>
+        <div class="qrcode">${esc(orderLabel(order.number))}</div>
+      </div>
+    </div>
+
+    <div class="next">
+      <h2>Що далі?</h2>
+      <div class="nbtns">
+        <a class="btn white" href="profile.html">Мої квитки</a>
+        <a class="btn dark" href="catalog.html">До розкладу</a>
+        ${cancelled || past ? "" : `<button class="btn line" id="cancel">Скасувати бронювання</button>`}
+      </div>
+    </div>`;
+
+  if (!cancelled) drawQR($("qr"), order.number, 220);
+  if ($("pdf")) $("pdf").onclick = () => window.print();
+  if ($("ics")) $("ics").onclick = downloadIcs;
+  if ($("mail")) $("mail").href = "mailto:" + encodeURIComponent(order.email || "") +
+    "?subject=" + encodeURIComponent("Квиток " + orderLabel(order.number) + " — " + m.title) +
+    "&body=" + encodeURIComponent(`${m.title}\n${dt}\n${[s.hall, s.location].filter(Boolean).join(" · ")}\n${seatsText(order.seats.map(x => x.code))}\nНомер замовлення: ${orderLabel(order.number)}`);
+
+  if ($("cancel")) $("cancel").onclick = async () => {
+    if (!confirm("Скасувати бронювання?")) return;
+    try {
+      await api(`/orders/${encodeURIComponent(num)}/cancel`, { method: "POST" });
+      toast("Бронювання скасовано");
+      setTimeout(() => location.href = "profile.html", 900);
+    } catch (err) { toast("Не вдалося скасувати: " + err.message); }
+  };
+}
+
+function downloadIcs() {
+  const s = order.session, m = order.movie;
+  const fmt = d => { const x = new Date(d), p = n => String(n).padStart(2, "0"); return `${x.getFullYear()}${p(x.getMonth() + 1)}${p(x.getDate())}T${p(x.getHours())}${p(x.getMinutes())}00`; };
+  const esc2 = t => String(t).replace(/[,;]/g, c => "\\" + c);
+  const start = new Date(s.startTime), end = new Date(start.getTime() + (m.durationMinutes || 120) * 60000);
+  const text = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//Pokaz Tinei//UA", "BEGIN:VEVENT",
+    `UID:${order.number}@pokaz-tinei`, `DTSTAMP:${fmt(new Date())}`, `DTSTART:${fmt(start)}`, `DTEND:${fmt(end)}`,
+    `SUMMARY:${esc2(m.title)}`, `LOCATION:${esc2([s.hall, s.location].filter(Boolean).join(" · "))}`,
+    `DESCRIPTION:${esc2(seatsText(order.seats.map(x => x.code)) + ". Замовлення " + orderLabel(order.number))}`,
+    "END:VEVENT", "END:VCALENDAR"].join("\r\n");
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([text], { type: "text/calendar" }));
+  a.download = "pokaz-tinei.ics";
+  a.click();
+}
+</script>
+</body>
+</html>

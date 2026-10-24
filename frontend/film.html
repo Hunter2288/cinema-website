@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Фільм — Показ тіней</title>
+  <link rel="stylesheet" href="main.css">
+</head>
+<body>
+<div id="header"></div>
+<main class="wrap" id="content"><p class="msg">Завантаження…</p></main>
+<div id="footer"></div>
+
+<script src="app.js"></script>
+<script>
+header("films"); footer();
+
+const $ = i => document.getElementById(i);
+const id = Number(new URLSearchParams(location.search).get("id"));
+const box = $("content");
+const TOTAL_SEATS = 40;               // 5 рядів × 8 місць
+let rating = 5, upcoming = [], taken = new Map(), day = "all", loc = "";
+
+const plural = (n, f) => {
+  const a = n % 10, b = n % 100;
+  return a === 1 && b !== 11 ? f[0] : (a >= 2 && a <= 4 && (b < 12 || b > 14)) ? f[1] : f[2];
+};
+const tabLabel = d => {
+  const x = new Date(d + "T00:00:00");
+  const wd = x.toLocaleDateString("uk-UA", { weekday: "short" });
+  const dm = String(x.getDate()).padStart(2, "0") + "." + String(x.getMonth() + 1).padStart(2, "0");
+  return d === dayKey(new Date()) ? "Сьогодні " + dm : wd.charAt(0).toUpperCase() + wd.slice(1) + " " + dm;
+};
+
+(async () => {
+  try {
+    const [m, sessions] = await Promise.all([api("/movies/" + id), api("/sessions?movieId=" + id)]);
+    try {
+      const tickets = await api("/tickets");
+      tickets.filter(t => !isCancelled(t.status))
+             .forEach(t => taken.set(t.sessionId, (taken.get(t.sessionId) || 0) + 1));
+    } catch {}
+    upcoming = sessions.filter(s => new Date(s.startTime) > new Date())
+                       .sort((a, b) => new Date(a.startTime) - new Date(b.startTime));
+    document.title = `${m.title} — Показ тіней`;
+    draw(m);
+    renderSchedule();
+    wireReviewForm();
+    loadReviews();
+  } catch (e) {
+    if (e.status === 404) box.innerHTML = `<p class="msg err">Фільм не знайдено. <a href="catalog.html" style="text-decoration:underline">До каталогу</a></p>`;
+    else showError(box, e);
+  }
+})();
+
+function draw(m) {
+  const fact = (l, v) => v ? `<div><dt>${l}</dt><dd>${esc(v)}</dd></div>` : "";
+  const stills = (m.stills || "").split(";").map(s => s.trim()).filter(Boolean).slice(0, 4);
+  const metaLine = [durText(m.durationMinutes), m.ageRating, m.year, m.country].filter(Boolean).join(" · ");
+  const days = [...new Set(upcoming.map(s => dayKey(s.startTime)))].slice(0, 7);
+  const locs = [...new Set(upcoming.map(s => s.location).filter(Boolean))];
+
+  box.innerHTML = `
+    <div class="film">
+      <div class="poster-big">${posterHtml(m)}</div>
+      <div>
+        <h1>${esc(m.title)}</h1>
+        <div class="gpills">${genresOf(m).map(g => `<span class="gpill">${esc(g)}</span>`).join("")}</div>
+        <div class="fmeta">${esc(metaLine)}</div>
+        ${m.rating != null ? `<div class="frate" id="frate" data-base="★ ${esc(m.rating)}">★ ${esc(m.rating)}</div>` : ""}
+        <dl class="facts">${fact("Режисер", m.director)}${fact("У ролях", m.cast)}${fact("Мова", m.language)}${fact("Формат", m.format)}</dl>
+        <h3>Опис</h3>
+        <p class="desc">${esc(m.description)}</p>
+        <div class="actions">
+          ${m.trailerUrl ? `<a class="btn dark" href="${esc(m.trailerUrl)}" target="_blank" rel="noopener">▶ Дивитись трейлер</a>` : ""}
+          <a class="btn" href="booking.html?movie=${m.id}">Забронювати квиток</a>
+        </div>
+      </div>
+    </div>
+
+    ${stills.length ? `<section class="stills"><h3>Кадри з фільму</h3><div class="stills-grid">
+      ${stills.map(s => `<a href="${esc(s)}" target="_blank" rel="noopener"><img src="${esc(s)}" alt="Кадр з фільму «${esc(m.title)}»" loading="lazy"></a>`).join("")}
+    </div></section>` : ""}
+
+    <section class="bigpanel">
+      <h2>Розклад показів</h2>
+      <div class="sfilters">
+        <div class="dtabs" id="dtabs">
+          <button class="dtab on" data-d="all">Усі</button>
+          ${days.map(d => `<button class="dtab" data-d="${d}">${tabLabel(d)}</button>`).join("")}
+        </div>
+        ${locs.length > 1 ? `<select id="locsel" aria-label="Локація"><option value="">Усі локації</option>
+          ${locs.map(l => `<option>${esc(l)}</option>`).join("")}</select>` : ""}
+      </div>
+      <div class="sgrid" id="sgrid"></div>
+
+      <div class="rtitle"><h2>Відгуки та оцінки</h2><button class="btn" id="rbtn">Залишити відгук</button></div>
+      <div class="rsum">
+        <div class="rbox" id="rbox"></div>
+        <div class="bars" id="bars"></div>
+        <div class="yourrev" id="rform">
+          <h3>Ваш відгук (для зареєстрованих)</h3>
+          <textarea id="rtext" maxlength="1000" placeholder="Поділіться враженнями…"></textarea>
+          <div class="row">
+            <div class="pick" id="pick">${[1, 2, 3, 4, 5].map(n => `<button type="button" aria-label="Оцінка ${n}">★</button>`).join("")}</div>
+            <button class="btn small" id="rsend">Надіслати</button>
+          </div>
+        </div>
+      </div>
+      <div class="reviews" id="rlist"></div>
+    </section>`;
+
+  $("dtabs").onclick = e => {
+    const b = e.target.closest(".dtab");
+    if (!b) return;
+    day = b.dataset.d;
+    document.querySelectorAll(".dtab").forEach(x => x.classList.toggle("on", x === b));
+    renderSchedule();
+  };
+  if ($("locsel")) $("locsel").onchange = e => { loc = e.target.value; renderSchedule(); };
+}
+
+function renderSchedule() {
+  const list = upcoming.filter(s => (day === "all" || dayKey(s.startTime) === day) && (!loc || s.location === loc));
+  const groups = new Map();
+  list.forEach(s => {
+    const k = dayKey(s.startTime) + "|" + (s.location || "") + "|" + (s.hall || "");
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k).push(s);
+  });
+  $("sgrid").innerHTML = groups.size ? [...groups.values()].map(g => `
+    <div class="scard">
+      <h4>${fmtDateFull(g[0].startTime)}</h4>
+      <div class="where">${esc([g[0].hall, g[0].location].filter(Boolean).join(" · "))}</div>
+      <div class="times">${g.map(s => {
+        const free = TOTAL_SEATS - (taken.get(s.id) || 0);
+        return `<a class="tbtn ${free <= 0 ? "off" : ""}" href="booking.html?session=${s.id}"><b>${fmtTime(s.startTime)}</b><small>${free > 0 ? free + " вільних" : "немає місць"}</small></a>`;
+      }).join("")}</div>
+    </div>`).join("") : `<p class="msg">Для вибраних параметрів сеансів немає.</p>`;
+}
+
+async function loadReviews() {
+  let list;
+  try { list = await api("/reviews?movieId=" + id); }
+  catch { $("rlist").innerHTML = `<p class="msg">Відгуки тимчасово недоступні.</p>`; return; }
+
+  const n = list.length, avg = n ? list.reduce((a, r) => a + r.rating, 0) / n : 0;
+  const word = plural(n, ["оцінка", "оцінки", "оцінок"]);
+  $("rbox").innerHTML = `<b>${n ? avg.toFixed(1) : "—"}</b><div class="stars">${stars(Math.round(avg))}</div><div class="rcount">${n} ${word}</div>`;
+  $("bars").innerHTML = [5, 4, 3, 2, 1].map(k => {
+    const c = list.filter(r => r.rating === k).length;
+    return `<div class="bar"><span>${k}</span><i><s style="width:${n ? c / n * 100 : 0}%"></s></i></div>`;
+  }).join("");
+  const fr = $("frate");
+  if (fr) fr.textContent = n ? `${fr.dataset.base} (${n} ${word})` : fr.dataset.base;
+
+  $("rlist").innerHTML = n ? list.map(r => `
+    <div class="review">
+      <div class="rhead">
+        <span class="av">${esc((r.userName || "?").charAt(0).toUpperCase())}</span>
+        <div><div>${esc(r.userName)}</div><div class="stars">${stars(r.rating)} <small>${r.rating}/5</small></div></div>
+      </div>
+      <p>${esc(r.text)}</p>
+    </div>`).join("") : `<p class="msg">Відгуків поки немає. Станьте першим.</p>`;
+}
+
+function wireReviewForm() {
+  $("rbtn").onclick = () => {
+    $("rform").scrollIntoView({ behavior: "smooth", block: "center" });
+    $("rtext").focus({ preventScroll: true });
+  };
+  const picks = document.querySelectorAll("#pick button");
+  const paint = () => picks.forEach((b, k) => b.classList.toggle("on", k < rating));
+  picks.forEach((b, k) => b.onclick = () => { rating = k + 1; paint(); });
+  paint();
+
+  $("rsend").onclick = async e => {
+    if (!USER_ID) { location.href = "login.html?next=" + encodeURIComponent("film.html?id=" + id); return; }
+    const text = $("rtext").value.trim();
+    if (text.length < 3) { toast("Напишіть кілька слів про фільм"); return; }
+    e.target.disabled = true;
+    try {
+      await api("/reviews", { method: "POST", body: JSON.stringify({ movieId: id, userId: USER_ID, rating, text }) });
+      $("rtext").value = "";
+      toast("Дякуємо за відгук");
+      loadReviews();
+    } catch (err) { toast(err.detail || "Не вдалося надіслати відгук"); }
+    e.target.disabled = false;
+  };
+}
+</script>
+</body>
+</html>
